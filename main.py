@@ -28,9 +28,13 @@ def handle_start(message):
     if user_chat_id not in sent_posts:
         sent_posts[user_chat_id] = set()
         bot.send_message(user_chat_id, "Вы подписаны на рассылку!")
-        send_next_post(user_chat_id) 
+        send_next_post(user_chat_id)  # Отправляем первый пост
     else:
-        bot.send_message(user_chat_id, "Вы уже подписаны, посты будут приходить по расписанию.")
+        # Если посты уже отправлялись, отправляем последний полученный
+        last_post_id = max(sent_posts[user_chat_id]) if sent_posts[user_chat_id] else None
+        if last_post_id:
+            handle_view_post(user_chat_id, last_post_id)
+
 
 
 
