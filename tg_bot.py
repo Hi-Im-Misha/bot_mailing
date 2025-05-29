@@ -2,13 +2,14 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from settings import TOKEN_BOT
 import requests
-from datetime import datetime
+# from datetime import datetime
 import os
-from telebot.types import InputMediaPhoto
 import json
 
 bot = telebot.TeleBot(TOKEN_BOT)
-FILE_PATH = r'C:\mylife\Git_project\bot_mailing\shedule.json'
+SHEDULE_FILE_PATH = r'C:\mylife\Git_project\bot_mailing\shedule.json'
+POSTS_FILE_PATH = r'C:\mylife\Git_project\bot_mailing\posts.json'
+media_folder = r"C:\mylife\Git_project\bot_mailing\media"
 
 user_data = {}
 
@@ -32,9 +33,9 @@ START_DESCRIPTION = (
     "• Настроить расписание постов указав время, интервал и режим\n\n"
 
     "⏹️ Кнопки:\n"
-    "• ➕Создать пост - Предложит отправить фотографии и описание после сохронит данные\n\n"
+    "• ➕Создать пост - Предложит отправить фотографии, описание и ссылку после сохронит пост\n\n"
     "•  🗂Редактировать пост - При нажатии покажет кнопки с уже созданными постами а так же с кнопкой удалить\n\n"
-    "•  🗓Настройки расписания - При нажатии покажет кнопки с настройками расписания времени, интервала и режима\n\n"
+    "•  🗓Настройки расписания - При нажатии покажет кнопки с настройками расписания времени, интервала\n\n"
     "❓ Просто следуйте инструкциям после команды!"
 )
 
@@ -63,8 +64,8 @@ def callback_query(call):
     #     sever_mode(call)
     # elif call.data == 'continuous':
     #     sever_mode(call)
-    elif call.data == 'start_shedule':
-        ask_for_start_time(call)
+    # elif call.data == 'start_shedule':
+    #     ask_for_start_time(call)
 
 def handle_create_post(call):
     user_id = call.from_user.id
@@ -113,7 +114,6 @@ def handle_text(message):
     elif 'url' not in user_data[user_id]:
         text = message.text.strip()
         if text == "-":
-            # Пользователь не хочет кнопку
             user_data[user_id]['url'] = None
             user_data[user_id]['button_text'] = None
 
@@ -125,8 +125,8 @@ def handle_text(message):
                     message.chat.id,
                     media_group,
                     description,
-                    None,  # url
-                    None   # button_text
+                    None,
+                    None
                 )
             else:
                 bot.send_message(message.chat.id, "⚠️ Вы не отправили ни одной фотографии.")
@@ -175,14 +175,11 @@ def is_in_post_mode(user_id):
 
 # --------------------------------Save post-------------------------------------
 def save_media_and_text(chat_id, media_group, text_message, url=None, button_text=None):
-    posts_file = r"C:\mylife\Git_project\bot_mailing\posts.json"
-    media_folder = r"C:\mylife\Git_project\bot_mailing\media"
-
     if not os.path.exists(media_folder):
         os.makedirs(media_folder)
 
-    if os.path.exists(posts_file):
-        with open(posts_file, "r", encoding="utf-8") as f:
+    if os.path.exists(POSTS_FILE_PATH):
+        with open(POSTS_FILE_PATH, "r", encoding="utf-8") as f:
             try:
                 posts = json.load(f)
             except json.JSONDecodeError:
@@ -219,7 +216,7 @@ def save_media_and_text(chat_id, media_group, text_message, url=None, button_tex
 
     posts.append(post_data)
 
-    with open(posts_file, "w", encoding="utf-8") as f:
+    with open(POSTS_FILE_PATH, "w", encoding="utf-8") as f:
         json.dump(posts, f, indent=4, ensure_ascii=False)
 
     bot.send_message(chat_id, f"✅ Пост #{post_id} успешно сохранён!")
@@ -229,13 +226,11 @@ def save_media_and_text(chat_id, media_group, text_message, url=None, button_tex
 
 # --------------------------------Show posts-------------------------------------
 def handle_show_posts(call):
-    posts_file = r"C:\mylife\Git_project\bot_mailing\posts.json"
-
-    if not os.path.exists(posts_file):
+    if not os.path.exists(POSTS_FILE_PATH):
         bot.send_message(call.message.chat.id, "Нет сохранённых постов.")
         return
 
-    with open(posts_file, "r", encoding="utf-8") as f:
+    with open(POSTS_FILE_PATH, "r", encoding="utf-8") as f:
         try:
             posts = json.load(f)
         except json.JSONDecodeError:
@@ -261,13 +256,11 @@ def handle_show_posts(call):
 
 
 def handle_view_post(chat_id, post_id):
-    posts_file = r"C:\mylife\Git_project\bot_mailing\posts.json"
-
-    if not os.path.exists(posts_file):
+    if not os.path.exists(POSTS_FILE_PATH):
         bot.send_message(chat_id, "Файл с постами не найден.")
         return
 
-    with open(posts_file, "r", encoding="utf-8") as f:
+    with open(POSTS_FILE_PATH, "r", encoding="utf-8") as f:
         try:
             posts = json.load(f)
         except json.JSONDecodeError:
@@ -320,13 +313,11 @@ def handle_view_post(chat_id, post_id):
 # --------------------------------Del posts-------------------------------------
 
 def handle_delete_post(chat_id, post_id):
-    posts_file = r"C:\mylife\Git_project\bot_mailing\posts.json"
-
-    if not os.path.exists(posts_file):
+    if not os.path.exists(POSTS_FILE_PATH):
         bot.send_message(chat_id, "Файл с постами не найден.")
         return
 
-    with open(posts_file, "r", encoding="utf-8") as f:
+    with open(POSTS_FILE_PATH, "r", encoding="utf-8") as f:
         posts = json.load(f)
 
     post = next((p for p in posts if p["id"] == post_id), None)
@@ -343,7 +334,7 @@ def handle_delete_post(chat_id, post_id):
 
     posts = [p for p in posts if p["id"] != post_id]
 
-    with open(posts_file, "w", encoding="utf-8") as f:
+    with open(POSTS_FILE_PATH, "w", encoding="utf-8") as f:
         json.dump(posts, f, indent=4, ensure_ascii=False)
 
     bot.send_message(chat_id, f"❌ Пост #{post_id} удалён.")
@@ -356,40 +347,67 @@ def handle_delete_post(chat_id, post_id):
 
 # --------------------------------Shedule-------------------------------------
 def handle_shedule(call):
+
+    with open(SHEDULE_FILE_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        start_time = data.get("start_time", "")
+        stop_time = data.get("stop_time", "")
+        interval = data.get("interval", "")
+
+
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("📆 Начало Рассылки", callback_data="start_shedule"),
+        # InlineKeyboardButton("📆 График работы", callback_data="start_shedule"),
         InlineKeyboardButton("⏳ Интервал поста", callback_data="set_interval")
         # InlineKeyboardButton("⚙️ Выбор режима", callback_data="select_mode")
     )
 
-    bot.send_message(call.message.chat.id, "Настройки расписания:\n\n• Начало Рассылки - время c которого начнется рассылка\n\n• Интервал поста - интервал между которыми будет приходить пост\n\n• Выбор режима - отвечает за то будут ли посты приходить одноразово или постоянно\n\n\n ", reply_markup=markup)
+    bot.send_message(call.message.chat.id, 
+        f"Настройки расписания:\n\n"
+        # "• График работы - это время, когда будут приходить посты например с 12:00 по 18:00\n\n"
+        "• Интервал поста - интервал, через который будут приходить посты\n\n"
+        # "• Выбор режима - отвечает за то, будут ли посты приходить одноразово или постоянно\n\n\n"
+        "Настройки сейчас:\n"
+        f"Интервал: {interval},\n",
+        # f"Рассылка будет происходить с: {start_time} по {stop_time}",
+        reply_markup=markup
+    )
 
-def ask_for_start_time(call):
-    msg = bot.send_message(call.message.chat.id, "✍️ Напишите время c которого начнется рассылка (например: 12:00):")
-    bot.register_next_step_handler(msg, save_start_time)      
+
+# def ask_for_start_time(call):
+#     msg = bot.send_message(call.message.chat.id, "⏰ Напишите время начала рассылки (например: 12:00):")
+#     bot.register_next_step_handler(msg, lambda message: ask_for_stop_time(message, message.text))
+
+
+# def ask_for_stop_time(message, start_time):
+#     msg = bot.send_message(message.chat.id, "⏳ Теперь напишите время окончания рассылки (например: 18:00):")
+#     bot.register_next_step_handler(msg, lambda message: save_schedule_times(message, start_time, message.text))
+
+    
 
 def ask_for_interval(call):
     msg = bot.send_message(call.message.chat.id, "✍️ Напишите интервал поста например: \n\n• 24:00 (1 день)\n\n• 00:30 (30 минут)\n\n• 00:01 (1 минута)")
     bot.register_next_step_handler(msg, save_interval)
 
 
-def save_start_time(message):
-    start_time = message.text
-
+def save_schedule_times(message, start_time, stop_time):
     try:
         try:
-            with open(FILE_PATH, "r", encoding="utf-8") as f:
+            with open(SHEDULE_FILE_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             data = {}
-        
-        data["start_time"] = start_time
 
-        with open(FILE_PATH, "w", encoding="utf-8") as f:
+        data["start_time"] = start_time
+        data["stop_time"] = stop_time
+
+        with open(SHEDULE_FILE_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
 
-        bot.send_message(message.chat.id, f"✅ Время начала сохранено: {start_time}")
+        bot.send_message(
+            message.chat.id,
+            f"✅ Время рассылки установлено:\nС {start_time} до {stop_time}"
+        )
 
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Ошибка при сохранении: {e}")
@@ -401,13 +419,13 @@ def save_interval(message):
 
     try:
         try:
-            with open(FILE_PATH, "r", encoding="utf-8") as f:
+            with open(SHEDULE_FILE_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             data = {}
         
         data["interval"] = interval
-        with open(FILE_PATH, "w", encoding="utf-8") as f:
+        with open(SHEDULE_FILE_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
 
         bot.send_message(message.chat.id, f"✅ Интервал сохранён: {interval}")
@@ -420,13 +438,13 @@ def save_interval(message):
 # def sever_mode(call):
 #     try:
 #         try:
-#             with open(FILE_PATH, "r", encoding="utf-8") as f:
+#             with open(SHEDULE_FILE_PATH, "r", encoding="utf-8") as f:
 #                 data = json.load(f)
 #         except (FileNotFoundError, json.JSONDecodeError):
 #             data = {}
 #         data["mode"] = call.data
 
-#         with open(FILE_PATH, "w", encoding="utf-8") as f:
+#         with open(SHEDULE_FILE_PATH, "w", encoding="utf-8") as f:
 #             json.dump(data, f, indent=4, ensure_ascii=False)
 
 #         bot.send_message(call.message.chat.id, f"✅ Режим сохранён: {call.data}")
