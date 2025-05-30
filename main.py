@@ -3,15 +3,15 @@ import json
 import telebot
 from telebot.types import InputMediaPhoto
 from apscheduler.schedulers.background import BackgroundScheduler
-from datetime import datetime, timedelta
 from settings import main_token
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from apscheduler.triggers.cron import CronTrigger
 
 
 
 BOT_TOKEN = main_token
-POSTS_FILE_PATH = r"C:\mylife\Git_project\bot_mailing\posts.json"
+POSTS_FILE_PATH = "posts.json"
+COUNT_FILE = "count.txt"
+USERS_FILE = "users_id.txt"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 scheduler = BackgroundScheduler()
@@ -22,18 +22,22 @@ sent_posts = {}
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
-    global user_chat_id
     user_chat_id = message.chat.id
-    
-    if user_chat_id not in sent_posts:
+    username = message.from_user.username or "unknown"
+
+    print(f"Пользователь @{username} подключился. ID: {user_chat_id}")
+
+    if is_new_user(username):
+        save_user_id(username)
+        increment_user_count()
         sent_posts[user_chat_id] = set()
-        bot.send_message(user_chat_id, "Вы подписаны на рассылку!")
-        send_next_post(user_chat_id)  # Отправляем первый пост
+        send_next_post(user_chat_id)
     else:
-        # Если посты уже отправлялись, отправляем последний полученный
-        last_post_id = max(sent_posts[user_chat_id]) if sent_posts[user_chat_id] else None
+        last_post_id = max(sent_posts.get(user_chat_id, [])) if sent_posts.get(user_chat_id) else None
         if last_post_id:
             handle_view_post(user_chat_id, last_post_id)
+
+
 
 
 
@@ -48,19 +52,19 @@ def load_posts():
 
 def handle_view_post(chat_id, post_id):
     if not os.path.exists(POSTS_FILE_PATH):
-        bot.send_message(chat_id, "Файл с постами не найден.")
+        print("Файл с постами не найден.")
         return
 
     with open(POSTS_FILE_PATH, "r", encoding="utf-8") as f:
         try:
             posts = json.load(f)
         except json.JSONDecodeError:
-            bot.send_message(chat_id, "Ошибка при чтении постов.")
+            print("Невалидный файл с постами.")
             return
 
     post = next((p for p in posts if p["id"] == post_id), None)
     if not post:
-        bot.send_message(chat_id, "Пост не найден.")
+        print("Пост не найден.")
         return
 
     media_group = []
@@ -90,7 +94,7 @@ def handle_view_post(chat_id, post_id):
                     media_group[0].caption = post["description"]
                     bot.send_media_group(chat_id, media_group)
         else:
-            bot.send_message(chat_id, "Файлы фотографий не найдены.")
+            print("Пост не содержит фотографий.")
     finally:
         for f in photo_files:
             f.close()
@@ -123,12 +127,43 @@ def send_next_post(chat_id):
 
 
 def load_schedule_times():
-    with open(r'C:\mylife\Git_project\bot_mailing\shedule.json', 'r', encoding='utf-8') as file:
+    print(load_schedule_times)
+    with open('shedule.json', 'r', encoding='utf-8') as file:
         data = json.load(file)
     interval_str = data["interval"]
     print(interval_str)
     hours, minutes = map(int, interval_str.split(":"))
     return hours, minutes
 
+
+
+def increment_user_count():
+    print(increment_user_count)
+    count = get_user_count() + 1
+    with open(COUNT_FILE, "w") as f:
+        f.write(str(count))
+
+
+def is_new_user(username):
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            users = f.read().splitlines()
+        return f"@{username}" not in users
+    except FileNotFoundError:
+        return True
+
+
+def save_user_id(user_id):
+    print(save_user_id)
+    with open(USERS_FILE, "a") as f:
+        f.write(f"@{user_id}\n")
+
+def get_user_count():
+    print(get_user_count)
+    try:
+        with open(COUNT_FILE, "r") as f:
+            return int(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        return 0
 
 bot.polling(none_stop=True)

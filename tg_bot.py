@@ -1,25 +1,28 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
-from settings import TOKEN_BOT
-import requests
-# from datetime import datetime
+from settings import TOKEN_BOT, ADMIN_ID
 import os
 import json
+import re
 
 bot = telebot.TeleBot(TOKEN_BOT)
-SHEDULE_FILE_PATH = r'C:\mylife\Git_project\bot_mailing\shedule.json'
-POSTS_FILE_PATH = r'C:\mylife\Git_project\bot_mailing\posts.json'
-media_folder = r"C:\mylife\Git_project\bot_mailing\media"
+SHEDULE_FILE_PATH = 'shedule.json'
+POSTS_FILE_PATH = 'posts.json'
+media_folder = "media"
 
 user_data = {}
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "Доступ запрещён.")
+        return
     markup = InlineKeyboardMarkup()
     markup.add(
         InlineKeyboardButton("➕Создать пост", callback_data="create_post"),
-        InlineKeyboardButton("🗂Редактировать пост", callback_data="show_posts"),
-        InlineKeyboardButton("🗓Настроить расписание", callback_data="shedule")
+        InlineKeyboardButton("🗂Показать / Удалить", callback_data="show_posts"),
+        InlineKeyboardButton("🗓Настроить расписание", callback_data="shedule"),
+        InlineKeyboardButton("👥Количество пользователей", callback_data="user_count")
     )
     bot.send_message(message.chat.id, START_DESCRIPTION, reply_markup=markup)
 
@@ -34,8 +37,9 @@ START_DESCRIPTION = (
 
     "⏹️ Кнопки:\n"
     "• ➕Создать пост - Предложит отправить фотографии, описание и ссылку после сохронит пост\n\n"
-    "•  🗂Редактировать пост - При нажатии покажет кнопки с уже созданными постами а так же с кнопкой удалить\n\n"
+    "•  🗂Показать / Удалить - При нажатии покажет кнопки с уже созданными постами а так же с кнопкой удалить\n\n"
     "•  🗓Настройки расписания - При нажатии покажет кнопки с настройками расписания времени, интервала\n\n"
+    "•  👥Количество пользователей - При нажатии покажет количество пользователей\n\n"
     "❓ Просто следуйте инструкциям после команды!"
 )
 
@@ -58,14 +62,12 @@ def callback_query(call):
         handle_shedule(call)
     elif call.data == 'set_interval':
         ask_for_interval(call)
-    # elif call.data == 'select_mode':
-    #     select_mode(call)
-    # elif call.data == 'one_time':
-    #     sever_mode(call)
-    # elif call.data == 'continuous':
-    #     sever_mode(call)
-    # elif call.data == 'start_shedule':
-    #     ask_for_start_time(call)
+
+    elif call.data == 'user_count':
+        ask_for_user_count(call)
+
+    elif call.data == 'get_user_list':
+        send_user_list(call)
 
 def handle_create_post(call):
     user_id = call.from_user.id
@@ -97,7 +99,7 @@ def handle_photo(message):
 
 
 @bot.message_handler(content_types=['text'])
-def handle_text(message):
+def handle_text(message): 
     user_id = message.from_user.id
 
     if not is_in_post_mode(user_id):
@@ -350,47 +352,28 @@ def handle_shedule(call):
 
     with open(SHEDULE_FILE_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
-        start_time = data.get("start_time", "")
-        stop_time = data.get("stop_time", "")
         interval = data.get("interval", "")
 
 
     markup = InlineKeyboardMarkup()
     markup.add(
-        # InlineKeyboardButton("📆 График работы", callback_data="start_shedule"),
         InlineKeyboardButton("⏳ Интервал поста", callback_data="set_interval")
-        # InlineKeyboardButton("⚙️ Выбор режима", callback_data="select_mode")
     )
 
     bot.send_message(call.message.chat.id, 
         f"Настройки расписания:\n\n"
-        # "• График работы - это время, когда будут приходить посты например с 12:00 по 18:00\n\n"
         "• Интервал поста - интервал, через который будут приходить посты\n\n"
-        # "• Выбор режима - отвечает за то, будут ли посты приходить одноразово или постоянно\n\n\n"
         "Настройки сейчас:\n"
         f"Интервал: {interval},\n",
-        # f"Рассылка будет происходить с: {start_time} по {stop_time}",
         reply_markup=markup
     )
-
-
-# def ask_for_start_time(call):
-#     msg = bot.send_message(call.message.chat.id, "⏰ Напишите время начала рассылки (например: 12:00):")
-#     bot.register_next_step_handler(msg, lambda message: ask_for_stop_time(message, message.text))
-
-
-# def ask_for_stop_time(message, start_time):
-#     msg = bot.send_message(message.chat.id, "⏳ Теперь напишите время окончания рассылки (например: 18:00):")
-#     bot.register_next_step_handler(msg, lambda message: save_schedule_times(message, start_time, message.text))
-
-    
 
 def ask_for_interval(call):
     msg = bot.send_message(call.message.chat.id, "✍️ Напишите интервал поста например: \n\n• 24:00 (1 день)\n\n• 00:30 (30 минут)\n\n• 00:01 (1 минута)")
     bot.register_next_step_handler(msg, save_interval)
 
 
-def save_schedule_times(message, start_time, stop_time):
+def save_schedule_times(message, stop_time):
     try:
         try:
             with open(SHEDULE_FILE_PATH, "r", encoding="utf-8") as f:
@@ -398,16 +381,9 @@ def save_schedule_times(message, start_time, stop_time):
         except (FileNotFoundError, json.JSONDecodeError):
             data = {}
 
-        data["start_time"] = start_time
-        data["stop_time"] = stop_time
 
         with open(SHEDULE_FILE_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
-
-        bot.send_message(
-            message.chat.id,
-            f"✅ Время рассылки установлено:\nС {start_time} до {stop_time}"
-        )
 
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Ошибка при сохранении: {e}")
@@ -415,7 +391,10 @@ def save_schedule_times(message, start_time, stop_time):
 
 
 def save_interval(message):
-    interval = message.text
+    interval = message.text.strip()
+    if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", interval):
+        bot.send_message(message.chat.id, "❌ Неверный формат! Пожалуйста, введите время в формате HH:MM (например, 12:30)")
+        return
 
     try:
         try:
@@ -435,35 +414,23 @@ def save_interval(message):
 
 
 
-# def sever_mode(call):
-#     try:
-#         try:
-#             with open(SHEDULE_FILE_PATH, "r", encoding="utf-8") as f:
-#                 data = json.load(f)
-#         except (FileNotFoundError, json.JSONDecodeError):
-#             data = {}
-#         data["mode"] = call.data
+def ask_for_user_count(call):
+    try:
+        with open("count.txt", "r") as file:
+            user_count = file.read().strip()
 
-#         with open(SHEDULE_FILE_PATH, "w", encoding="utf-8") as f:
-#             json.dump(data, f, indent=4, ensure_ascii=False)
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("📂 Получить список пользователей", callback_data="get_user_list"))
 
-#         bot.send_message(call.message.chat.id, f"✅ Режим сохранён: {call.data}")
+        bot.send_message(call.message.chat.id, f"👥 Количество пользователей: {user_count}", reply_markup=keyboard)
+    except FileNotFoundError:
+        bot.send_message(call.message.chat.id, "Ошибка: файл count.txt не найден.")
 
-#     except Exception as e:
-#         bot.send_message(call.message.chat.id, f"❌ Ошибка при сохранении: {e}")
-
-
-# def select_mode(call):
-#     markup = InlineKeyboardMarkup()
-#     markup.add(
-#         InlineKeyboardButton("1️⃣Получать одноразово", callback_data="one_time"),
-#         InlineKeyboardButton("🔂Получать постоянно", callback_data="continuous")
-#     )
-
-#     bot.edit_message_text("Выберите режим получения:", call.message.chat.id, call.message.message_id, reply_markup=markup)
-
-
-
-
+def send_user_list(call):
+    try:
+        with open("users_id.txt", "rb") as file:
+            bot.send_document(call.message.chat.id, file)
+    except FileNotFoundError:
+        bot.send_message(call.message.chat.id, "Ошибка: файл users_id.txt не найден.")
 
 bot.polling(none_stop=True)
