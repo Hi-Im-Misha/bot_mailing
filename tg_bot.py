@@ -1,13 +1,15 @@
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
-from settings import TOKEN_BOT, ADMIN_ID
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
+from settings import tg_bot_token, ADMIN_ID
 import os
 import json
 import re
+from telebot import TeleBot, types
 
-bot = telebot.TeleBot(TOKEN_BOT)
-SHEDULE_FILE_PATH = 'shedule.json'
-POSTS_FILE_PATH = 'posts.json'
+
+bot = telebot.TeleBot(tg_bot_token)
+SHEDULE_FILE_PATH = "shedule.json"
+POSTS_FILE_PATH = "posts.json"
 media_folder = "media"
 
 user_data = {}
@@ -46,6 +48,9 @@ START_DESCRIPTION = (
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
+    
+    message = call.message
+    
     if call.data == "create_post":
         handle_create_post(call)
     elif call.data == "show_posts":
@@ -69,6 +74,12 @@ def callback_query(call):
     elif call.data == 'get_user_list':
         send_user_list(call)
 
+    elif call.data == "no text":
+        handle_no_text(call)
+
+    elif call.data == "skip_button":
+        handle_skip_button(call)
+
 def handle_create_post(call):
     user_id = call.from_user.id
     user_data[user_id] = {
@@ -76,18 +87,54 @@ def handle_create_post(call):
         "media_group": [],
         "media_group_ids": set()
     }
-    bot.send_message(call.message.chat.id, "Отправьте одно или несколько фото для поста")
+    bot.send_message(call.message.chat.id, "Отправьте одно или несколько фото, видео, голосовое или кружок для поста")
 
 
-@bot.message_handler(content_types=['photo'])
+@bot.message_handler(content_types=['photo', 'video', 'document', 'audio', 'voice', 'video_note'])
 def handle_photo(message):
     user_id = message.from_user.id
-
+    
+    content_types = message.content_type
+    print(content_types)
+    
     if not is_in_post_mode(user_id):
         return
 
-    file_id = message.photo[-1].file_id
-    user_data[user_id]["media_group"].append(file_id)
+
+    if content_types == 'photo':
+        print(message.photo)
+        file_id = message.photo[-1].file_id
+        print(file_id)
+
+    elif content_types == 'video':
+        print(message.video)
+        file_id = message.video.file_id
+        print(file_id)
+    
+    elif content_types == 'document':
+        print(message.document)
+        file_id = message.document.file_id
+        print(file_id)
+    
+    elif content_types == 'audio':
+        print(message.audio)
+        file_id = message.audio.file_id
+        print(file_id)
+    
+    elif content_types == 'voice':
+        print(message.voice)
+        file_id = message.voice.file_id
+        print(file_id)
+    
+    elif content_types == 'video_note':
+        print(message.video_note)
+        file_id = message.video_note.file_id
+        print(file_id)
+
+    user_data[user_id]["media_group"].append({
+        "file_id": file_id,
+        "type": content_types
+    })
 
     mgid = message.media_group_id
     if mgid:
@@ -107,38 +154,24 @@ def handle_text(message):
 
     if 'description' not in user_data[user_id]:
         user_data[user_id]['description'] = message.text
+
+        keyboard = types.InlineKeyboardMarkup()
+        button_skip = types.InlineKeyboardButton("Пропустить", callback_data="skip_button")
+        keyboard.add(button_skip)
+
         bot.send_message(
             message.chat.id,
-            "🔗 Теперь отправьте ссылку для кнопки (например, https://example.com).\nЕсли вы не хотите добавлять кнопку, отправьте `-`."
+            "🔗 Теперь отправьте ссылку для кнопки (например, https://example.com).\n\nили\n\nЕсли не хотите добавлять кнопку, нажмите 'Пропустить'.",
+            reply_markup=keyboard
         )
         return
 
     elif 'url' not in user_data[user_id]:
         text = message.text.strip()
-        if text == "-":
-            user_data[user_id]['url'] = None
-            user_data[user_id]['button_text'] = None
-
-            media_group = user_data[user_id].get("media_group", [])
-            description = user_data[user_id].get("description", "")
-
-            if media_group:
-                save_media_and_text(
-                    message.chat.id,
-                    media_group,
-                    description,
-                    None,
-                    None
-                )
-            else:
-                bot.send_message(message.chat.id, "⚠️ Вы не отправили ни одной фотографии.")
-
-            user_data.pop(user_id, None)
-            return
-        else:
-            user_data[user_id]['url'] = text
-            bot.send_message(message.chat.id, "📝 Введите название для кнопки (например, 'Перейти'):")
-            return
+        
+        user_data[user_id]['url'] = text
+        bot.send_message(message.chat.id, "📝 Введите название для кнопки (например, 'Перейти'):")
+        return
 
     elif 'button_text' not in user_data[user_id]:
         user_data[user_id]['button_text'] = message.text
@@ -164,10 +197,60 @@ def handle_text(message):
 
 
 
+user_data = {}
+user_states = {}
+
+def handle_no_text(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    
+    if user_id not in user_data:
+        user_data[user_id] = {}
+    user_data[user_id]['no_text'] = True
+    
+    media_group = user_data[user_id].get("media_group", [])
+    
+    if media_group:
+        save_media_and_text(chat_id, media_group, url=None, button_text=None)
+    else:
+        bot.send_message(chat_id, "⚠️ Вы не отправили ни одной фотографии.")
+    
+    user_data.pop(user_id, None)
+    user_states.pop(user_id, None)
+
+
+
+def handle_skip_button(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    user_data[user_id]['url'] = None
+    user_data[user_id]['button_text'] = None
+
+    media_group = user_data[user_id].get("media_group", [])
+    description = user_data[user_id].get("description", "")
+
+    if media_group:
+        save_media_and_text(
+            chat_id,
+            media_group,
+            description,
+            None,
+            None
+        )
+
+    user_data.pop(user_id, None)
+    return
+
 
 
 def send_photo_hint(chat_id):
-    bot.send_message(chat_id, "После отправки всех фото отправьте текст поста.")
+    markup = types.InlineKeyboardMarkup()
+    no_text_button = types.InlineKeyboardButton("Без описания", callback_data="no text")
+    markup.add(no_text_button)
+    
+    bot.send_message(chat_id, "После отправки всех фото отправьте текст поста.\n\n или \n\nНажмите кнопку для создания поста без описания", reply_markup=markup)
+
+
 
 def is_in_post_mode(user_id):
     return user_id in user_data and user_data[user_id].get("post_mode", False)
@@ -176,7 +259,8 @@ def is_in_post_mode(user_id):
 
 
 # --------------------------------Save post-------------------------------------
-def save_media_and_text(chat_id, media_group, text_message, url=None, button_text=None):
+def save_media_and_text(chat_id, media_group, text_message=None, url=None, button_text=None):
+
     if not os.path.exists(media_folder):
         os.makedirs(media_folder)
 
@@ -192,9 +276,23 @@ def save_media_and_text(chat_id, media_group, text_message, url=None, button_tex
     post_id = posts[-1]["id"] + 1 if posts else 1
 
     saved_photos = []
-    for idx, file_id in enumerate(media_group):
+    for idx, item in enumerate(media_group):
+        file_id = item["file_id"]
+        media_type = item["type"]
+
         file_info = bot.get_file(file_id)
-        file_ext = os.path.splitext(file_info.file_path)[-1] or ".jpg"
+
+        if media_type == "photo":
+            file_ext = ".jpg"
+        elif media_type == "video":
+            file_ext = ".mp4"
+        elif media_type == "video_note":
+            file_ext = ".mp4"
+        elif media_type == "voice":
+            file_ext = ".ogg"
+        else:
+            file_ext = os.path.splitext(file_info.file_path)[-1] or ""
+
         file_name = f"post_{post_id}_{idx + 1}{file_ext}"
         file_path = os.path.join(media_folder, file_name)
 
@@ -202,13 +300,18 @@ def save_media_and_text(chat_id, media_group, text_message, url=None, button_tex
         with open(file_path, 'wb') as f:
             f.write(downloaded_file)
 
-        saved_photos.append(file_path.replace("\\", "/"))
+        saved_photos.append({
+            "path": file_path.replace("\\", "/"),
+            "type": media_type
+        })
 
     post_data = {
         "id": post_id,
         "photos": saved_photos,
-        "description": text_message,
     }
+
+    if text_message:
+        post_data["description"] = text_message
 
     if url and button_text:
         post_data["button"] = {
@@ -222,6 +325,9 @@ def save_media_and_text(chat_id, media_group, text_message, url=None, button_tex
         json.dump(posts, f, indent=4, ensure_ascii=False)
 
     bot.send_message(chat_id, f"✅ Пост #{post_id} успешно сохранён!")
+
+
+
 
 
 
@@ -244,14 +350,12 @@ def handle_show_posts(call):
 
     markup = InlineKeyboardMarkup(row_width=2)
     for post in posts:
-        description_preview = post.get("description", "")[:20] or "Без описания"
+        description_preview = post.get("description", "")[:20] or f"Пост #{post['id']} - Без описания"
         view_button = InlineKeyboardButton(f"👁 {description_preview}", callback_data=f"view_post_{post['id']}")
         delete_button = InlineKeyboardButton(f"❌ Удалить", callback_data=f"delete_post_{post['id']}")
         markup.add(view_button, delete_button)
 
     bot.send_message(call.message.chat.id, "📋 Список постов:", reply_markup=markup)
-
-
 
 
 
@@ -274,37 +378,82 @@ def handle_view_post(chat_id, post_id):
         bot.send_message(chat_id, "Пост не найден.")
         return
 
-    media_group = []
-    photo_files = []
+    media_items = []
+    open_files = []
 
-    for photo_path in post["photos"]:
-        if os.path.exists(photo_path):
-            photo_file = open(photo_path, "rb")
-            photo_files.append(photo_file)
-            media_group.append(InputMediaPhoto(photo_file))
+    voice_file = None
+    video_note_file = None
 
+    for item in post.get("photos", []):
+        media_type = item.get("type")
+        path = item.get("path")
+
+        if not os.path.exists(path):
+            continue
+
+        file = open(path, "rb")
+        open_files.append(file)
+
+        if media_type == "photo":
+            media_items.append(("photo", file))
+        elif media_type == "video":
+            media_items.append(("video", file))
+        elif media_type == "voice":
+            voice_file = file
+        elif media_type == "video_note":
+            video_note_file = file
+        else:
+            file.close() 
+
+    description = post.get("description", "")
     markup = None
-    if "button" in post and post["button"]:
+    if "button" in post and post["button"] and post["button"].get("text") != "-":
         button = post["button"]
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(text=button["text"], url=button["url"]))
 
     try:
-        if media_group:
-            if len(media_group) == 1:
-                bot.send_photo(chat_id, media_group[0].media, caption=post["description"], reply_markup=markup)
-            else:
-                if markup:
-                    bot.send_media_group(chat_id, media_group)
-                    bot.send_message(chat_id, post["description"], reply_markup=markup)
-                else:
-                    media_group[0].caption = post["description"]
-                    bot.send_media_group(chat_id, media_group)
-        else:
-            bot.send_message(chat_id, "Файлы фотографий не найдены.")
+        if video_note_file:
+            bot.send_video_note(chat_id, video_note_file)
+
+        if len(media_items) == 1:
+            media_type, media_file = media_items[0]
+            if media_type == "photo":
+                bot.send_photo(chat_id, media_file, caption=description, reply_markup=markup)
+            elif media_type == "video":
+                bot.send_video(chat_id, media_file, caption=description, reply_markup=markup)
+
+        elif len(media_items) > 1:
+            media_group = []
+            for m_type, f in media_items:
+                if m_type == "photo":
+                    media_group.append(InputMediaPhoto(f))
+                elif m_type == "video":
+                    media_group.append(InputMediaVideo(f))
+
+            bot.send_media_group(chat_id, media_group)
+
+            if description or markup:
+                bot.send_message(chat_id, description, reply_markup=markup)
+
+
+        if voice_file:
+            bot.send_voice(chat_id, voice_file)
+
+        elif video_note_file and (description or markup) and len(media_items) == 0:
+            bot.send_message(chat_id, description, reply_markup=markup)
+
+        elif not media_items and not voice_file and not video_note_file:
+            bot.send_message(chat_id, "Файлы не найдены или не поддерживаются.")
+
+
     finally:
-        for f in photo_files:
+        for f in open_files:
             f.close()
+
+
+
+
 
 
 
@@ -327,12 +476,16 @@ def handle_delete_post(chat_id, post_id):
         bot.send_message(chat_id, "Пост не найден.")
         return
 
-    for photo_path in post["photos"]:
+    for photo_info in post["photos"]:
+        file_path = photo_info["path"] 
         try:
-            if os.path.exists(photo_path):
-                os.remove(photo_path)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"Файл {file_path} успешно удалён.")
+            else:
+                print(f"Файл {file_path} не найден.")
         except Exception as e:
-            print(f"Ошибка при удалении файла {photo_path}: {e}")
+            print(f"Ошибка при удалении файла {file_path}: {e}")
 
     posts = [p for p in posts if p["id"] != post_id]
 
@@ -340,7 +493,6 @@ def handle_delete_post(chat_id, post_id):
         json.dump(posts, f, indent=4, ensure_ascii=False)
 
     bot.send_message(chat_id, f"❌ Пост #{post_id} удалён.")
-
 
 
 
@@ -413,7 +565,7 @@ def save_interval(message):
         bot.send_message(message.chat.id, f"❌ Ошибка при сохранении: {e}")
 
 
-
+# --------------------------------User count-------------------------------------
 def ask_for_user_count(call):
     try:
         with open("count.txt", "r") as file:
