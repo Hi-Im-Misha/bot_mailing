@@ -30,16 +30,27 @@ def handle_start(message):
     if is_new_user(username):
         save_user_id(username)
         increment_user_count()
-
-    if user_chat_id not in sent_posts:
+    
+    
+    elif user_chat_id not in sent_posts:
         print("Создаем список отправленных постов для пользователя")
         sent_posts[user_chat_id] = set()
         send_next_post(user_chat_id)
 
     else:
         last_post_id = max(sent_posts.get(user_chat_id, [])) if sent_posts.get(user_chat_id) else None
-        if last_post_id:
+        
+        all_post_ids = {post['id'] for post in load_posts()}
+        user_sent_ids = sent_posts.get(user_chat_id, set())
+
+        remaining_posts = all_post_ids - user_sent_ids
+        if remaining_posts:
+            print("Есть новые посты, отправляем следующий")
+            send_next_post(user_chat_id)
+        else:
+            print("Все посты уже отправлены этому пользователю")
             handle_view_post(user_chat_id, last_post_id)
+
 
 
 
@@ -54,16 +65,14 @@ def load_posts():
 # ----------------показ поста-------------------
 def handle_view_post(chat_id, post_id):
     posts = load_posts_for_view_post()
-    print("posts", posts)
     if posts is None:
         bot.send_message(chat_id, "Ошибка при загрузке постов.")
-        return
+        return False
 
     post = get_post_by_id(posts, post_id)
     if not post:
         print("Пост не найден")
-        return
-
+        return False
 
     media_items, voice_file, video_note_file, open_files = prepare_media(post)
     description = post.get("description", "")
@@ -71,9 +80,14 @@ def handle_view_post(chat_id, post_id):
 
     try:
         send_post_content(chat_id, description, markup, media_items, voice_file, video_note_file)
+        return True
+    except Exception as e:
+        print(f"Ошибка при отправке поста: {e}")
+        return False
     finally:
         for f in open_files:
             f.close()
+
 
 def load_posts_for_view_post():
     print("load_posts_for_view_post")
@@ -134,8 +148,11 @@ def create_inline_markup(post):
 
 
 def send_post_content(chat_id, description, markup, media_items, voice_file, video_note_file):
+    sent_any = False
+
     if video_note_file:
         bot.send_video_note(chat_id, video_note_file)
+        sent_any = True
 
     if len(media_items) == 1:
         media_type, media_file = media_items[0]
@@ -143,6 +160,7 @@ def send_post_content(chat_id, description, markup, media_items, voice_file, vid
             bot.send_photo(chat_id, media_file, caption=description, reply_markup=markup)
         elif media_type == "video":
             bot.send_video(chat_id, media_file, caption=description, reply_markup=markup)
+        sent_any = True
 
     elif len(media_items) > 1:
         media_group = []
@@ -151,20 +169,23 @@ def send_post_content(chat_id, description, markup, media_items, voice_file, vid
                 media_group.append(InputMediaPhoto(f))
             elif m_type == "video":
                 media_group.append(InputMediaVideo(f))
-
         bot.send_media_group(chat_id, media_group)
-
+        sent_any = True
         if description or markup:
             bot.send_message(chat_id, description, reply_markup=markup)
 
     if voice_file:
         bot.send_voice(chat_id, voice_file)
+        sent_any = True
 
-    elif video_note_file and (description or markup) and len(media_items) == 0:
+    # В случае, если был только video_note и при этом есть описание или кнопка
+    if not media_items and not voice_file and video_note_file and (description or markup):
         bot.send_message(chat_id, description, reply_markup=markup)
 
-    elif not media_items and not voice_file and not video_note_file:
+    # Если вообще ничего не отправилось
+    if not sent_any and not description and not markup:
         print("Ни один файл не прошёл фильтр.")
+
 
 
 
@@ -182,10 +203,11 @@ def send_next_post(chat_id):
 
     for post in posts:
         post_id = post["id"]
-        if post["id"] not in sent_posts[chat_id]:
-            handle_view_post(chat_id, post_id)
-            sent_posts[chat_id].add(post["id"])
-            save_sent_posts()
+        if post_id not in sent_posts[chat_id]:
+            was_sent = handle_view_post(chat_id, post_id)
+            if was_sent:
+                sent_posts[chat_id].add(post_id)
+                save_sent_posts()
             break
 
 
@@ -237,16 +259,11 @@ def get_user_count():
 
 
 
-
-
-
-
 def load_sent_posts():
     if os.path.exists(SENT_POSTS_FILE):
         with open(SENT_POSTS_FILE, "r", encoding="utf-8") as f:
             try:
                 data = json.load(f)
-                # Преобразуем список в set для быстрого поиска
                 return {int(k): set(v) for k, v in data.items()}
             except json.JSONDecodeError:
                 return {}
@@ -255,9 +272,6 @@ def load_sent_posts():
 def save_sent_posts():
     with open(SENT_POSTS_FILE, "w", encoding="utf-8") as f:
         json.dump({str(k): list(v) for k, v in sent_posts.items()}, f, ensure_ascii=False, indent=2)
-
-
-
 
 
 sent_posts = load_sent_posts() 
