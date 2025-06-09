@@ -106,7 +106,7 @@ def handle_create_post(call):
         "media_group": [],
         "media_group_ids": set(),
         "step": "waiting_description",
-        "buttons": []
+        "button": []
     }
     bot.send_message(call.message.chat.id, "Отправьте одно или несколько фото, видео, голосовое или кружок для поста")
 
@@ -178,7 +178,7 @@ def handle_button_text_step(message):
     button_text = message.text.strip()
     url = user_data[user_id].pop('_current_url', '')
 
-    user_data[user_id]['buttons'].append({"text": button_text, "url": url})
+    user_data[user_id]['button'].append({"text": button_text, "url": url})
     user_data[user_id]['step'] = None
 
     keyboard = InlineKeyboardMarkup()
@@ -216,14 +216,14 @@ def handle_finish_post(call):
 
     media_group = data.get("media_group", [])
     description = data.get("description", "")
-    buttons = data.get("buttons", [])
+    button = data.get("button", [])
 
     if not media_group:
         bot.send_message(call.message.chat.id, "⚠️ Вы не отправили ни одной фотографии.")
         return
 
-    urls = [btn["url"] for btn in buttons] if buttons else []
-    texts = [btn["text"] for btn in buttons] if buttons else []
+    urls = [btn["url"] for btn in button] if button else []
+    texts = [btn["text"] for btn in button] if button else []
 
     save_media_and_text(
         chat_id=call.message.chat.id,
@@ -284,7 +284,7 @@ def save_media_and_text(chat_id, media_group, text_message=None, url=None, butto
     else:
         posts = []
 
-    post_id = posts[-1]["id"] + 1 if posts else 1
+    post_id = max([p["id"] for p in posts], default=0) + 1
 
     saved_photos = []
     for idx, item in enumerate(media_group):
@@ -325,7 +325,7 @@ def save_media_and_text(chat_id, media_group, text_message=None, url=None, butto
         post_data["description"] = text_message
 
     if isinstance(url, list) and isinstance(button_text, list):
-        post_data["buttons"] = [
+        post_data["button"] = [
             {"text": t, "url": u}
             for t, u in zip(button_text, url)
             if t and u
@@ -431,56 +431,79 @@ def handle_view_post(chat_id, post_id):
     description = post.get("description", "").strip()
     markup = None
 
-    buttons = post.get("buttons") or []
-    if not buttons and "button" in post:
+    button = post.get("button") or []
+    if not button and "button" in post:
         single_btn = post["button"]
         if single_btn.get("text") and single_btn.get("url"):
-            buttons = [single_btn]
+            button = [single_btn]
 
-    if buttons:
+    if button:
         markup = InlineKeyboardMarkup()
-        for btn in buttons:
-            markup.add(InlineKeyboardButton(text=btn["text"], url=btn["url"]))
+        if isinstance(button, list):
+            for btn in button:
+                if isinstance(btn, dict) and "text" in btn and "url" in btn:
+                    markup.add(InlineKeyboardButton(text=btn["text"], url=btn["url"]))
+        elif isinstance(button, dict) and "text" in button and "url" in button:
+            markup.add(InlineKeyboardButton(text=button["text"], url=button["url"]))
 
-    # --- Отправка контента ---
+
     try:
-        # 1. Кружок (всегда первым, если есть)
         if video_note_file:
+            print("Отправляем video_note")
             bot.send_video_note(chat_id, video_note_file)
+            sent_any = True
 
-        # 2. Фото/видео (одно или группа)
+            # Если есть кнопки, но нет description — добавим сообщение "👇 Подробнее:"
+            if button and not description:
+                print("Есть кнопки, но нет описания — добавляем '👇 Подробнее:'")
+                bot.send_message(chat_id, "👇 Подробнее:", reply_markup=markup)
+
+            elif button and description:
+                print("Есть кнопки и описание — добавляем его после video_note")
+                bot.send_message(chat_id, description, reply_markup=markup)
+
+            # Если есть description, то добавим его (с кнопками)
+            elif description:
+                print("Есть описание — добавляем его после video_note")
+                bot.send_message(chat_id, description, reply_markup=markup)
+
+
+
+        # === Если есть 1 медиафайл (фото или видео) ===
         if len(media_items) == 1:
-            media_type, file = media_items[0]
+            print("len(media_items) == 1")
+            media_type, media_file = media_items[0]
             if media_type == "photo":
-                bot.send_photo(chat_id, file, caption=description or None, reply_markup=markup)
+                bot.send_photo(chat_id, media_file, caption=description, reply_markup=markup)
             elif media_type == "video":
-                bot.send_video(chat_id, file, caption=description or None, reply_markup=markup)
+                bot.send_video(chat_id, media_file, caption=description, reply_markup=markup)
+            sent_any = True
 
-        elif len(media_items) > 1:
+        # === Если есть несколько медиафайлов ===
+        if len(media_items) > 1:
+            print("len(media_items) > 1")
             media_group = []
-            for media_type, file in media_items:
-                if media_type == "photo":
-                    media_group.append(InputMediaPhoto(file))
-                elif media_type == "video":
-                    media_group.append(InputMediaVideo(file))
-
+            for m_type, f in media_items:
+                if m_type == "photo":
+                    media_group.append(InputMediaPhoto(f))
+                elif m_type == "video":
+                    media_group.append(InputMediaVideo(f))
             bot.send_media_group(chat_id, media_group)
+            sent_any = True
 
             if description or markup:
-                bot.send_message(chat_id, description or "...", reply_markup=markup)
+                bot.send_message(chat_id, description, reply_markup=markup)
 
-        # 3. Голосовое сообщение
-        elif voice_file:
+        # === Если есть голосовое сообщение ===
+        if voice_file:
+            print("voice_file")
             bot.send_voice(chat_id, voice_file)
+            sent_any = True
 
-        # 4. Если только кружок и кнопки
-        elif video_note_file and markup:
-            bot.send_message(chat_id, "👇 Подробнее:", reply_markup=markup)
-
-        # 5. Если ничего не подошло
-        elif not media_items and not voice_file and not video_note_file:
-            bot.send_message(chat_id, "Файлы не найдены или не поддерживаются.")
-
+        # === Если ничего не отправилось — сообщаем об этом ===
+        if not sent_any and not description and not markup:
+            print("Ни один файл не прошёл фильтр.")
+    
     finally:
         for f in open_files:
             f.close()

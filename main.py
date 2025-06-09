@@ -4,6 +4,7 @@ import telebot
 from apscheduler.schedulers.background import BackgroundScheduler
 from settings import main_token
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaVideo, InputMediaPhoto
+from db import init_db, load_sent_posts, add_sent_post, migrate_from_json
 
 
 BOT_TOKEN = main_token
@@ -11,12 +12,14 @@ POSTS_FILE_PATH = "posts.json"
 COUNT_FILE = "count.txt"
 USERS_FILE = "users_id.txt"
 SHEDULE_FILE_PATH = "shedule.json"
-SENT_POSTS_FILE = "sent_posts.json"
 
 
 bot = telebot.TeleBot(BOT_TOKEN)
 scheduler = BackgroundScheduler()
 scheduler.start()
+
+conn = init_db()
+sent_posts = load_sent_posts(conn)
 
 user_chat_id = None
 
@@ -76,10 +79,12 @@ def handle_view_post(chat_id, post_id):
 
     media_items, voice_file, video_note_file, open_files = prepare_media(post)
     description = post.get("description", "")
-    markup = create_inline_markup(post)
+    button = post.get("button", [])  # ✅ Получаем список кнопок
+    markup = create_inline_markup(post)  # ✅ Создаём разметку для кнопок
 
     try:
-        send_post_content(chat_id, description, markup, media_items, voice_file, video_note_file)
+        # ✅ Передаём markup (для сообщений) и button (если нужно где-то отдельно)
+        send_post_content(chat_id, description, markup, media_items, voice_file, video_note_file, post_id, button)
         return True
     except Exception as e:
         print(f"Ошибка при отправке поста: {e}")
@@ -87,6 +92,7 @@ def handle_view_post(chat_id, post_id):
     finally:
         for f in open_files:
             f.close()
+
 
 
 def load_posts_for_view_post():
@@ -137,24 +143,61 @@ def prepare_media(post):
     return media_items, voice_file, video_note_file, open_files
 
 
+from telebot import types
+
 def create_inline_markup(post):
-    if "button" in post and post["button"] and post["button"].get("text") != "-":
-        button = post["button"]
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton(text=button["text"], url=button["url"]))
-        return markup
-    return None
+    button_data = post.get("button")
 
+    if not button_data:
+        return None
 
+    markup = types.InlineKeyboardMarkup()
 
-def send_post_content(chat_id, description, markup, media_items, voice_file, video_note_file):
+    # Если это список кнопок
+    if isinstance(button_data, list):
+        for btn in button_data:
+            if "text" in btn and "url" in btn:
+                markup.add(types.InlineKeyboardButton(text=btn["text"], url=btn["url"]))
+
+    # Если это один объект-кнопка
+    elif isinstance(button_data, dict):
+        if "text" in button_data and "url" in button_data:
+            markup.add(types.InlineKeyboardButton(text=button_data["text"], url=button_data["url"]))
+
+    # Если ничего не добавилось
+    if not markup.keyboard:
+        return None
+
+    return markup
+
+def send_post_content(chat_id, description, markup, media_items, voice_file, video_note_file, post_id, button):
     sent_any = False
 
+    # === Если есть video_note ===
     if video_note_file:
+        print("Отправляем video_note")
         bot.send_video_note(chat_id, video_note_file)
         sent_any = True
 
+        # Если есть кнопки, но нет description — добавим сообщение "👇 Подробнее:"
+        if button and not description:
+            print("Есть кнопки, но нет описания — добавляем '👇 Подробнее:'")
+            bot.send_message(chat_id, "👇 Подробнее:", reply_markup=markup)
+
+        elif button and description:
+            print("Есть кнопки и описание — добавляем его после video_note")
+            bot.send_message(chat_id, description, reply_markup=markup)
+
+        # Если есть description, то добавим его (с кнопками)
+        elif description:
+            print("Есть описание — добавляем его после video_note")
+            bot.send_message(chat_id, description, reply_markup=markup)
+
+
+
+    # === Если есть 1 медиафайл (фото или видео) ===
     if len(media_items) == 1:
+        print("len(media_items) == 1")
         media_type, media_file = media_items[0]
         if media_type == "photo":
             bot.send_photo(chat_id, media_file, caption=description, reply_markup=markup)
@@ -162,7 +205,9 @@ def send_post_content(chat_id, description, markup, media_items, voice_file, vid
             bot.send_video(chat_id, media_file, caption=description, reply_markup=markup)
         sent_any = True
 
-    elif len(media_items) > 1:
+    # === Если есть несколько медиафайлов ===
+    if len(media_items) > 1:
+        print("len(media_items) > 1")
         media_group = []
         for m_type, f in media_items:
             if m_type == "photo":
@@ -171,30 +216,25 @@ def send_post_content(chat_id, description, markup, media_items, voice_file, vid
                 media_group.append(InputMediaVideo(f))
         bot.send_media_group(chat_id, media_group)
         sent_any = True
+
         if description or markup:
             bot.send_message(chat_id, description, reply_markup=markup)
 
+    # === Если есть голосовое сообщение ===
     if voice_file:
+        print("voice_file")
         bot.send_voice(chat_id, voice_file)
         sent_any = True
 
-    # В случае, если был только video_note и при этом есть описание или кнопка
-    if not media_items and not voice_file and video_note_file and (description or markup):
-        bot.send_message(chat_id, description, reply_markup=markup)
-
-    # Если вообще ничего не отправилось
+    # === Если ничего не отправилось — сообщаем об этом ===
     if not sent_any and not description and not markup:
         print("Ни один файл не прошёл фильтр.")
-
-
-
 
 # -------------------отправка постов------------------------
 def send_next_post(chat_id):
     print("send_next_post")
     global sent_posts
     posts = load_posts_for_view_post()
-    print("posts", posts)
     if not posts or chat_id is None:
         return
     
@@ -207,7 +247,7 @@ def send_next_post(chat_id):
             was_sent = handle_view_post(chat_id, post_id)
             if was_sent:
                 sent_posts[chat_id].add(post_id)
-                save_sent_posts()
+                add_sent_post(conn, chat_id, post_id)
             break
 
 
@@ -217,8 +257,6 @@ def send_next_post(chat_id):
         scheduler.remove_job(f'post_job_{chat_id}')
     
     scheduler.add_job(send_next_post, 'interval', hours=hours, minutes=minutes, id=f'post_job_{chat_id}', args=[chat_id])
-
-
 
 
 def load_schedule_times():
@@ -258,21 +296,12 @@ def get_user_count():
 
 
 
+def start_sending_to_existing_users():
+    print("Запуск рассылки для старых пользователей...")
+    for chat_id in sent_posts.keys():
+        print(f"▶️ Запускаем для {chat_id}")
+        send_next_post(chat_id)
 
-def load_sent_posts():
-    if os.path.exists(SENT_POSTS_FILE):
-        with open(SENT_POSTS_FILE, "r", encoding="utf-8") as f:
-            try:
-                data = json.load(f)
-                return {int(k): set(v) for k, v in data.items()}
-            except json.JSONDecodeError:
-                return {}
-    return {}
+start_sending_to_existing_users()
 
-def save_sent_posts():
-    with open(SENT_POSTS_FILE, "w", encoding="utf-8") as f:
-        json.dump({str(k): list(v) for k, v in sent_posts.items()}, f, ensure_ascii=False, indent=2)
-
-
-sent_posts = load_sent_posts() 
 bot.polling(none_stop=True)
