@@ -5,6 +5,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from settings import main_token
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaVideo, InputMediaPhoto
 from db import init_db, load_sent_posts, add_sent_post, migrate_from_json
+import time
+import requests
+
 
 BOT_TOKEN = main_token
 POSTS_FILE_PATH = "posts.json"
@@ -30,6 +33,7 @@ def handle_start(message):
     print(f"Пользователь @{username} подключился. ID: {user_chat_id}")
 
     if is_new_user(username):
+        print(username, "новый пользователь")
         save_user_id(username)
         increment_user_count()
     
@@ -40,6 +44,7 @@ def handle_start(message):
         send_next_post(user_chat_id)
 
     else:
+        print("Пользователь уже подключился")
         last_post_id = max(sent_posts.get(user_chat_id, [])) if sent_posts.get(user_chat_id) else None
         
         all_post_ids = {post['id'] for post in load_posts()}
@@ -78,8 +83,8 @@ def handle_view_post(chat_id, post_id):
 
     media_items, voice_file, video_note_file, open_files = prepare_media(post)
     description = post.get("description", "")
-    button = post.get("button", [])  # ✅ Получаем список кнопок
-    markup = create_inline_markup(post)  # ✅ Создаём разметку для кнопок
+    button = post.get("button", [])
+    markup = create_inline_markup(post)
 
     try:
         send_post_content(chat_id, description, markup, media_items, voice_file, video_note_file, post_id, button)
@@ -99,7 +104,6 @@ def load_posts_for_view_post():
         return []
     with open(POSTS_FILE_PATH, "r", encoding="utf-8") as f:
         try:
-            print("json.load(f)")
             return json.load(f)
         except json.JSONDecodeError:
             return []
@@ -229,7 +233,7 @@ def send_post_content(chat_id, description, markup, media_items, voice_file, vid
 
 # -------------------отправка постов------------------------
 def send_next_post(chat_id):
-    print("send_next_post")
+    print(f"▶️ Запускаем для {chat_id}")
     global sent_posts
     posts = load_posts_for_view_post()
     if not posts or chat_id is None:
@@ -295,9 +299,17 @@ def get_user_count():
 
 def start_sending_to_existing_users():
     for chat_id in sent_posts.keys():
-        print(f"▶️ Запускаем для {chat_id}")
+        print(f"▶️ start_sending_to_existing_users {chat_id}")
         send_next_post(chat_id)
 
 start_sending_to_existing_users()
 
-bot.polling(none_stop=True)
+while True:
+    try:
+        bot.polling(none_stop=True)
+    except requests.exceptions.ReadTimeout:
+        print("Read timeout, retrying...")
+        time.sleep(5)
+    except Exception as e:
+        print(f"Polling failed: {e}")
+        time.sleep(5)

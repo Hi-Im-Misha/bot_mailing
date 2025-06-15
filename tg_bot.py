@@ -6,6 +6,7 @@ import json
 import re
 from telebot import TeleBot, types
 from db import init_db, delete_sent_posts_by_post_id
+import random
 
 bot = telebot.TeleBot(tg_bot_token)
 conn = init_db()
@@ -311,7 +312,8 @@ def save_media_and_text(chat_id, media_group, text_message=None, url=None, butto
     else:
         posts = []
 
-    post_id = max([p["id"] for p in posts], default=0) + 1
+    existing_ids = {p["id"] for p in posts}
+    post_id = generate_unique_post_id(existing_ids)
 
     saved_photos = []
     for idx, item in enumerate(media_group):
@@ -545,7 +547,12 @@ def handle_view_post(chat_id, post_id):
 
 
 
-
+def generate_unique_post_id(existing_ids):
+    """Generate a random numeric ID not present in existing_ids."""
+    while True:
+        post_id = random.randint(1000, 999999)
+        if post_id not in existing_ids:
+            return post_id
 
 
 
@@ -677,4 +684,15 @@ def send_user_list(call):
     except FileNotFoundError:
         bot.send_message(call.message.chat.id, "Ошибка: файл users_id.txt не найден.")
 
-bot.polling(none_stop=True)
+import time
+import requests
+
+while True:
+    try:
+        bot.polling(none_stop=True)
+    except requests.exceptions.ReadTimeout:
+        print("Read timeout, retrying...")
+        time.sleep(5)
+    except Exception as e:
+        print(f"Polling failed: {e}")
+        time.sleep(5)
