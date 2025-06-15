@@ -6,22 +6,21 @@ from settings import main_token
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaVideo, InputMediaPhoto
 from db import init_db, load_sent_posts, add_sent_post, migrate_from_json
 
-
 BOT_TOKEN = main_token
 POSTS_FILE_PATH = "posts.json"
 COUNT_FILE = "count.txt"
 USERS_FILE = "users_id.txt"
 SHEDULE_FILE_PATH = "shedule.json"
-
+SENT_POSTS_FILE = "sent_posts.json"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 scheduler = BackgroundScheduler()
 scheduler.start()
 
 conn = init_db()
+migrate_from_json(conn, SENT_POSTS_FILE)
 sent_posts = load_sent_posts(conn)
 
-user_chat_id = None
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
@@ -83,7 +82,6 @@ def handle_view_post(chat_id, post_id):
     markup = create_inline_markup(post)  # ✅ Создаём разметку для кнопок
 
     try:
-        # ✅ Передаём markup (для сообщений) и button (если нужно где-то отдельно)
         send_post_content(chat_id, description, markup, media_items, voice_file, video_note_file, post_id, button)
         return True
     except Exception as e:
@@ -96,7 +94,6 @@ def handle_view_post(chat_id, post_id):
 
 
 def load_posts_for_view_post():
-    print("load_posts_for_view_post")
     if not os.path.exists(POSTS_FILE_PATH):
         print("Файл с постами не найден.")
         return []
@@ -297,7 +294,6 @@ def get_user_count():
 
 
 def start_sending_to_existing_users():
-    print("Запуск рассылки для старых пользователей...")
     for chat_id in sent_posts.keys():
         print(f"▶️ Запускаем для {chat_id}")
         send_next_post(chat_id)

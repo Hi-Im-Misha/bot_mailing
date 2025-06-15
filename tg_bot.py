@@ -5,9 +5,10 @@ import os
 import json
 import re
 from telebot import TeleBot, types
-
+from db import init_db, delete_sent_posts_by_post_id
 
 bot = telebot.TeleBot(tg_bot_token)
+conn = init_db()
 SHEDULE_FILE_PATH = "shedule.json"
 POSTS_FILE_PATH = "posts.json"
 media_folder = "media"
@@ -205,6 +206,32 @@ def handle_add_button_without_description(call):
         "🔗 Отлично! Теперь отправьте ссылку для кнопки (например, https://example.com).\n\nили нажмите 'Пропустить'.",
         reply_markup=keyboard
     )
+
+
+
+def handle_skip_button(call):
+    """Save post after description when user skips adding a button."""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+
+    data = user_data.get(user_id, {})
+    media_group = data.get("media_group", [])
+    description = data.get("description", "")
+
+    if not media_group:
+        bot.send_message(chat_id, "⚠️ Вы не отправили ни одной фотографии.")
+        user_data.pop(user_id, None)
+        return
+
+    save_media_and_text(
+        chat_id=chat_id,
+        media_group=media_group,
+        text_message=description,
+        url=None,
+        button_text=None,
+    )
+    user_data.pop(user_id, None)
+
 
 def handle_finish_post(call):
     user_id = call.from_user.id
@@ -552,6 +579,10 @@ def handle_delete_post(chat_id, post_id):
 
     with open(POSTS_FILE_PATH, "w", encoding="utf-8") as f:
         json.dump(posts, f, indent=4, ensure_ascii=False)
+
+    conn = init_db()
+    delete_sent_posts_by_post_id(conn, post_id)
+    conn.close()
 
     bot.send_message(chat_id, f"❌ Пост #{post_id} удалён.")
 

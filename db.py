@@ -53,3 +53,14 @@ def migrate_from_json(conn, json_path):
                 continue
             add_sent_post(conn, uid, pid_int)
     os.remove(json_path)
+
+
+def remove_post_records(conn, post_id):
+    """Delete all sent_post records for the given post_id."""
+    with conn:
+        conn.execute('DELETE FROM sent_posts WHERE post_id=?', (post_id,))
+
+def delete_sent_posts_by_post_id(conn, post_id):
+    """Remove records with the given post_id for all users."""
+    with conn:
+        conn.execute("DELETE FROM sent_posts WHERE post_id = ?", (post_id,))
