@@ -4,9 +4,16 @@ import telebot
 from apscheduler.schedulers.background import BackgroundScheduler
 from settings import main_token
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaVideo, InputMediaPhoto
-from db import init_db, load_sent_posts, add_sent_post, migrate_from_json
 import time
 import requests
+from telebot.apihelper import ApiTelegramException
+from db import (
+    init_db,
+    load_sent_posts,
+    add_sent_post,
+    migrate_from_json,
+    delete_user_records,
+)
 
 
 BOT_TOKEN = main_token
@@ -14,14 +21,12 @@ POSTS_FILE_PATH = "posts.json"
 COUNT_FILE = "count.txt"
 USERS_FILE = "users_id.txt"
 SHEDULE_FILE_PATH = "shedule.json"
-SENT_POSTS_FILE = "sent_posts.json"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 scheduler = BackgroundScheduler()
 scheduler.start()
 
 conn = init_db()
-migrate_from_json(conn, SENT_POSTS_FILE)
 sent_posts = load_sent_posts(conn)
 
 
@@ -50,7 +55,15 @@ def handle_start(message):
         all_post_ids = {post['id'] for post in load_posts()}
         user_sent_ids = sent_posts.get(user_chat_id, set())
 
-        remaining_posts = all_post_ids - user_sent_ids
+        valid_user_sent_ids = user_sent_ids & all_post_ids
+        
+        if valid_user_sent_ids != user_sent_ids:
+            sent_posts[user_chat_id] = valid_user_sent_ids
+
+        last_post_id = max(valid_user_sent_ids) if valid_user_sent_ids else None
+        remaining_posts = all_post_ids - valid_user_sent_ids
+        
+        
         if remaining_posts:
             print("Есть новые посты, отправляем следующий")
             send_next_post(user_chat_id)
@@ -59,7 +72,13 @@ def handle_start(message):
             handle_view_post(user_chat_id, last_post_id)
 
 
-
+def remove_user(chat_id):
+    """Completely remove a user from the mailing list."""
+    if scheduler.get_job(f'post_job_{chat_id}'):
+        scheduler.remove_job(f'post_job_{chat_id}')
+    sent_posts.pop(chat_id, None)
+    delete_user_records(conn, chat_id)
+    print(f"Пользователь {chat_id} удален из рассылки")
 
 
 def load_posts():
@@ -89,6 +108,13 @@ def handle_view_post(chat_id, post_id):
     try:
         send_post_content(chat_id, description, markup, media_items, voice_file, video_note_file, post_id, button)
         return True
+    except ApiTelegramException as e:
+        if "USER_IS_BLOCKED" in str(e) or "bot was blocked by the user" in str(e):
+            print(f"Пользователь {chat_id} заблокировал бота")
+            remove_user(chat_id)
+        else:
+            print(f"Ошибка при отправке поста: {e}")
+        return False
     except Exception as e:
         print(f"Ошибка при отправке поста: {e}")
         return False

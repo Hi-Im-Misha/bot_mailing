@@ -4,7 +4,6 @@ import json
 
 DB_PATH = 'sent_posts.db'
 
-
 def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     with conn:
@@ -63,4 +62,9 @@ def remove_post_records(conn, post_id):
 def delete_sent_posts_by_post_id(conn, post_id):
     """Remove records with the given post_id for all users."""
     with conn:
-        conn.execute("DELETE FROM sent_posts WHERE post_id = ?", (post_id,))
+         conn.execute("DELETE FROM sent_posts WHERE post_id = ?", (post_id,))
+
+def delete_user_records(conn, user_id):
+    """Remove all sent_post records for the given user_id."""
+    with conn:
+        conn.execute("DELETE FROM sent_posts WHERE user_id = ?", (user_id,))
