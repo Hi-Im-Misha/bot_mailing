@@ -324,7 +324,7 @@ def get_user_count():
 
 
 def start_sending_to_existing_users():
-    for chat_id in sent_posts.keys():
+    for chat_id in list(sent_posts.keys()):
         print(f"▶️ start_sending_to_existing_users {chat_id}")
         send_next_post(chat_id)
 
