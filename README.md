@@ -34,8 +34,7 @@
 
 1. Клонировать репозиторий:  
    ```bash
-   git clone https://github.com/username/repo-name.git
-   cd repo-name
+   git clone https://github.com/Hi-Im-Misha/bot_mailing.git
 2. Установить зависимости:
     ```bash
     pip install -r requirements.txt
